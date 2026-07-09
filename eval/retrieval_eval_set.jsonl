@@ -1,0 +1,18 @@
+{"query":"I forgot my login and the reset email is not showing up. What should I check?","expected_doc_id":"79b2ce54a3dc","expected_keywords":["reset","spam","junk","quarantine"]}
+{"query":"Can a support agent set a customer's new password for them?","expected_doc_id":"79b2ce54a3dc","expected_keywords":["never","password","behalf"]}
+{"query":"A user requested multiple password links. Which one is valid?","expected_doc_id":"79b2ce54a3dc","expected_keywords":["most recent","invalidates","older links"]}
+{"query":"What should we do if we think an account was taken over?","expected_doc_id":"79b2ce54a3dc","expected_keywords":["account takeover","security queue","audit logs"]}
+{"query":"Will resetting a password remove tickets or billing history?","expected_doc_id":"79b2ce54a3dc","expected_keywords":["does not delete","tickets","billing"]}
+{"query":"When are monthly customers invoiced?","expected_doc_id":"fb7b6b0529cd","expected_keywords":["first day","billing cycle","monthly"]}
+{"query":"Where can an admin download past invoices?","expected_doc_id":"fb7b6b0529cd","expected_keywords":["settings","billing","invoices"]}
+{"query":"If I add seats halfway through the month, how is the charge handled?","expected_doc_id":"fb7b6b0529cd","expected_keywords":["adds seats","prorates","remaining time"]}
+{"query":"Does removing users create an immediate refund?","expected_doc_id":"fb7b6b0529cd","expected_keywords":["removing seats","next renewal","refund"]}
+{"query":"What details are needed before escalating a refund request?","expected_doc_id":"fb7b6b0529cd","expected_keywords":["invoice number","workspace","reason"]}
+{"query":"How do tax exemption requests get reviewed?","expected_doc_id":"fb7b6b0529cd","expected_keywords":["tax exemption","certificate","business days"]}
+{"query":"What is the normal REST API request limit per minute?","expected_doc_id":"9f4373221718","expected_keywords":["six hundred","requests per minute","workspace"]}
+{"query":"My integration got HTTP 429. How should it retry?","expected_doc_id":"9f4373221718","expected_keywords":["429","retry-after","exponential backoff"]}
+{"query":"How can customers avoid polling the API too often?","expected_doc_id":"9f4373221718","expected_keywords":["webhook","polling","caching"]}
+{"query":"Which filters make API searches less expensive?","expected_doc_id":"9f4373221718","expected_keywords":["updated_after","status","customer_id"]}
+{"query":"What information should support collect for API throttling escalation?","expected_doc_id":"9f4373221718","expected_keywords":["workspace slug","endpoint names","timestamps"]}
+{"query":"Can an enterprise workspace burst above its API contract forever?","expected_doc_id":"9f4373221718","expected_keywords":["enterprise","higher contracted limit","throttled"]}
+{"query":"Are service accounts included in billing seat counts?","expected_doc_id":"fb7b6b0529cd","expected_keywords":["service accounts","seat counts","active users"]}
