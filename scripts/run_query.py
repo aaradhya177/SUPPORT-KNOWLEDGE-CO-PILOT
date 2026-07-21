@@ -15,6 +15,7 @@ from app.generation.generator import AnswerGenerator
 from app.llm.client import create_llm_client
 from app.retrieval.dense import DenseRetriever
 from app.retrieval.hybrid import HybridRetriever
+from app.retrieval.reranker import CrossEncoderReranker
 from app.retrieval.sparse import BM25Retriever
 from app.verification.judge import CitationVerifier
 
@@ -45,7 +46,13 @@ def main() -> None:
     sparse = BM25Retriever()
     sparse.load_index(args.sparse_dir)
 
-    hybrid = HybridRetriever(dense_retriever=dense, sparse_retriever=sparse)
+    settings = get_settings()
+    reranker = (
+        CrossEncoderReranker(model_name=settings.reranker_model_name)
+        if settings.enable_reranker
+        else None
+    )
+    hybrid = HybridRetriever(dense_retriever=dense, sparse_retriever=sparse, reranker=reranker)
     retrieved_chunks = hybrid.retrieve(args.query, top_k=args.top_k)
 
     llm_client = create_llm_client()

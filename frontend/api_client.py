@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+from collections.abc import Iterator
 from typing import Any
 
 import httpx
@@ -17,6 +19,8 @@ def query_backend(
     backend_url: str,
     query: str,
     top_k: int,
+    api_key: str,
+    filters: dict[str, Any] | None = None,
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
 ) -> dict[str, Any]:
     """Submit a query to the FastAPI backend.
@@ -33,13 +37,45 @@ def query_backend(
     return _post_json(
         backend_url=backend_url,
         path="/api/v1/query",
-        payload={"query": query, "top_k": top_k},
+        payload={"query": query, "top_k": top_k, "filters": filters},
+        api_key=api_key,
         timeout_seconds=timeout_seconds,
     )
 
 
+def stream_query_backend(
+    backend_url: str,
+    query: str,
+    top_k: int,
+    api_key: str,
+    filters: dict[str, Any] | None = None,
+    timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
+) -> Iterator[dict[str, Any]]:
+    """Stream query progress events from the FastAPI backend."""
+    url = _join_url(backend_url, "/api/v1/query/stream")
+    payload = {"query": query, "top_k": top_k, "filters": filters}
+    try:
+        with httpx.Client(timeout=timeout_seconds) as client:
+            with client.stream(
+                "POST",
+                url,
+                json=payload,
+                headers=_auth_headers(api_key),
+            ) as response:
+                response.raise_for_status()
+                for line in response.iter_lines():
+                    if line.startswith("data: "):
+                        yield json.loads(line.removeprefix("data: ").strip())
+    except httpx.HTTPStatusError as exc:
+        detail = _response_detail(exc.response)
+        raise BackendAPIError(f"Backend returned {exc.response.status_code}: {detail}") from exc
+    except httpx.HTTPError as exc:
+        raise BackendAPIError(f"Could not reach backend at {url}: {exc}") from exc
+
+
 def trigger_ingest(
     backend_url: str,
+    api_key: str,
     timeout_seconds: float = 30.0,
 ) -> dict[str, Any]:
     """Start backend ingestion.
@@ -55,12 +91,14 @@ def trigger_ingest(
         backend_url=backend_url,
         path="/api/v1/ingest",
         payload={},
+        api_key=api_key,
         timeout_seconds=timeout_seconds,
     )
 
 
 def get_ingest_status(
     backend_url: str,
+    api_key: str,
     timeout_seconds: float = 10.0,
 ) -> dict[str, Any]:
     """Fetch ingestion status from the backend.
@@ -75,6 +113,7 @@ def get_ingest_status(
     return _get_json(
         backend_url=backend_url,
         path="/api/v1/ingest/status",
+        api_key=api_key,
         timeout_seconds=timeout_seconds,
     )
 
@@ -101,6 +140,7 @@ def get_backend_health(
 
 def trigger_eval(
     backend_url: str,
+    api_key: str,
     sample_size: int | None = None,
     timeout_seconds: float = 600.0,
 ) -> dict[str, Any]:
@@ -118,6 +158,37 @@ def trigger_eval(
         backend_url=backend_url,
         path="/api/v1/eval/run",
         payload={"sample_size": sample_size},
+        api_key=api_key,
+        timeout_seconds=timeout_seconds,
+    )
+
+
+def submit_feedback(
+    backend_url: str,
+    api_key: str,
+    query: str,
+    answer: str,
+    status: str,
+    confidence: float,
+    rating: str,
+    comment: str | None,
+    citation_chunk_ids: list[str],
+    timeout_seconds: float = 30.0,
+) -> dict[str, Any]:
+    """Submit answer feedback to the backend."""
+    return _post_json(
+        backend_url=backend_url,
+        path="/api/v1/feedback",
+        payload={
+            "query": query,
+            "answer": answer,
+            "status": status,
+            "confidence": confidence,
+            "rating": rating,
+            "comment": comment,
+            "citation_chunk_ids": citation_chunk_ids,
+        },
+        api_key=api_key,
         timeout_seconds=timeout_seconds,
     )
 
@@ -126,13 +197,14 @@ def _post_json(
     backend_url: str,
     path: str,
     payload: dict[str, Any],
+    api_key: str | None,
     timeout_seconds: float,
 ) -> dict[str, Any]:
     """POST JSON and return JSON response."""
     url = _join_url(backend_url, path)
     try:
         with httpx.Client(timeout=timeout_seconds) as client:
-            response = client.post(url, json=payload)
+            response = client.post(url, json=payload, headers=_auth_headers(api_key))
             response.raise_for_status()
             return response.json()
     except httpx.HTTPStatusError as exc:
@@ -142,12 +214,17 @@ def _post_json(
         raise BackendAPIError(f"Could not reach backend at {url}: {exc}") from exc
 
 
-def _get_json(backend_url: str, path: str, timeout_seconds: float) -> dict[str, Any]:
+def _get_json(
+    backend_url: str,
+    path: str,
+    timeout_seconds: float,
+    api_key: str | None = None,
+) -> dict[str, Any]:
     """GET JSON and return JSON response."""
     url = _join_url(backend_url, path)
     try:
         with httpx.Client(timeout=timeout_seconds) as client:
-            response = client.get(url)
+            response = client.get(url, headers=_auth_headers(api_key))
             response.raise_for_status()
             return response.json()
     except httpx.HTTPStatusError as exc:
@@ -160,6 +237,13 @@ def _get_json(backend_url: str, path: str, timeout_seconds: float) -> dict[str, 
 def _join_url(backend_url: str, path: str) -> str:
     """Join backend base URL and path."""
     return f"{backend_url.rstrip('/')}{path}"
+
+
+def _auth_headers(api_key: str | None) -> dict[str, str]:
+    """Build authentication headers when an API key is present."""
+    if not api_key:
+        return {}
+    return {"X-API-Key": api_key}
 
 
 def _response_detail(response: httpx.Response) -> str:

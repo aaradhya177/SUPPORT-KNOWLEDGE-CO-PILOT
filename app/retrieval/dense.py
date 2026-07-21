@@ -11,7 +11,13 @@ import faiss
 import numpy as np
 
 from app.config import get_settings
-from app.retrieval.base import BaseRetriever, RetrievedChunk
+from app.retrieval.base import (
+    BaseRetriever,
+    RetrievalFilters,
+    RetrievedChunk,
+    infer_category,
+    record_matches_filters,
+)
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -98,12 +104,18 @@ class DenseRetriever(BaseRetriever):
             "Loaded dense index with %s metadata records from %s", len(self.metadata), index_dir
         )
 
-    def retrieve(self, query: str, top_k: int = 10) -> list[RetrievedChunk]:
+    def retrieve(
+        self,
+        query: str,
+        top_k: int = 10,
+        filters: RetrievalFilters | None = None,
+    ) -> list[RetrievedChunk]:
         """Retrieve dense nearest-neighbor chunks for a query.
 
         Args:
             query: User query text.
             top_k: Maximum number of results to return.
+            filters: Optional metadata filters.
 
         Returns:
             Ranked dense retrieval results.
@@ -123,26 +135,35 @@ class DenseRetriever(BaseRetriever):
             normalize_embeddings=True,
         )
         query_vector = np.asarray(query_embedding, dtype=np.float32)
-        scores, indices = self.index.search(query_vector, min(top_k, self.index.ntotal))
+        search_k = self.index.ntotal if filters is not None else min(top_k, self.index.ntotal)
+        scores, indices = self.index.search(query_vector, search_k)
 
         results: list[RetrievedChunk] = []
-        for rank, (score, index_position) in enumerate(zip(scores[0], indices[0]), start=1):
+        for score, index_position in zip(scores[0], indices[0]):
             if index_position < 0 or index_position >= len(self.metadata):
                 continue
             record = self.metadata[int(index_position)]
+            if not record_matches_filters(record, filters):
+                continue
             results.append(
                 RetrievedChunk(
                     chunk_id=str(record["chunk_id"]),
                     doc_id=str(record["doc_id"]),
                     source_path=str(record.get("source_path", "")),
+                    category=str(
+                        record.get("category") or infer_category(record.get("source_path", ""))
+                    ),
+                    updated_at=record.get("updated_at"),
                     text=str(record["text"]),
                     section=record.get("section"),
                     score=float(score),
-                    rank=rank,
+                    rank=len(results) + 1,
                     retriever_name="dense",
                     source_retrievers=["dense"],
                 )
             )
+            if len(results) >= top_k:
+                break
 
         return results
 
@@ -171,6 +192,9 @@ def _load_chunk_metadata(chunks_path: Path) -> list[dict[str, Any]]:
                     "chunk_id": payload["chunk_id"],
                     "doc_id": payload["doc_id"],
                     "source_path": payload.get("source_path", ""),
+                    "category": payload.get("category")
+                    or infer_category(payload.get("source_path", "")),
+                    "updated_at": payload.get("updated_at"),
                     "text": payload["text"],
                     "section": payload.get("section"),
                 }

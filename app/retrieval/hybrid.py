@@ -1,7 +1,8 @@
 """Hybrid retrieval by fusing dense and sparse retrieval results."""
 
-from app.retrieval.base import BaseRetriever, RetrievedChunk
+from app.retrieval.base import BaseRetriever, RetrievalFilters, RetrievedChunk
 from app.retrieval.fusion import reciprocal_rank_fusion
+from app.retrieval.reranker import BaseReranker
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -16,6 +17,7 @@ class HybridRetriever(BaseRetriever):
         sparse_retriever: BaseRetriever,
         rrf_k: int = 60,
         expansion_factor: int = 3,
+        reranker: BaseReranker | None = None,
     ) -> None:
         """Initialize a hybrid retriever with injected dependencies.
 
@@ -25,6 +27,7 @@ class HybridRetriever(BaseRetriever):
             rrf_k: Reciprocal Rank Fusion constant.
             expansion_factor: Multiplier used to retrieve a wider candidate set
                 from each sub-retriever before fusion.
+            reranker: Optional reranker for fused candidate chunks.
         """
         if expansion_factor <= 0:
             raise ValueError("expansion_factor must be greater than zero.")
@@ -33,13 +36,20 @@ class HybridRetriever(BaseRetriever):
         self.sparse_retriever = sparse_retriever
         self.rrf_k = rrf_k
         self.expansion_factor = expansion_factor
+        self.reranker = reranker
 
-    def retrieve(self, query: str, top_k: int = 10) -> list[RetrievedChunk]:
+    def retrieve(
+        self,
+        query: str,
+        top_k: int = 10,
+        filters: RetrievalFilters | None = None,
+    ) -> list[RetrievedChunk]:
         """Retrieve fused dense and sparse results for a query.
 
         Args:
             query: User query text.
             top_k: Maximum number of fused results to return.
+            filters: Optional metadata filters.
 
         Returns:
             Hybrid retrieval results ranked by fused RRF score.
@@ -51,8 +61,16 @@ class HybridRetriever(BaseRetriever):
             return []
 
         candidate_k = top_k * self.expansion_factor
-        dense_results = self.dense_retriever.retrieve(query=query, top_k=candidate_k)
-        sparse_results = self.sparse_retriever.retrieve(query=query, top_k=candidate_k)
+        dense_results = self.dense_retriever.retrieve(
+            query=query,
+            top_k=candidate_k,
+            filters=filters,
+        )
+        sparse_results = self.sparse_retriever.retrieve(
+            query=query,
+            top_k=candidate_k,
+            filters=filters,
+        )
 
         if not dense_results and not sparse_results:
             logger.warning("Hybrid retriever received no results from either sub-retriever.")
@@ -62,4 +80,6 @@ class HybridRetriever(BaseRetriever):
             ranked_lists=[dense_results, sparse_results],
             k=self.rrf_k,
         )
+        if self.reranker is not None:
+            return self.reranker.rerank(query=query, chunks=fused_results, top_k=top_k)
         return fused_results[:top_k]

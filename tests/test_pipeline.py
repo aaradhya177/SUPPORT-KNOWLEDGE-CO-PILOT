@@ -2,7 +2,7 @@
 
 from app.generation.generator import Citation, GeneratedAnswer
 from app.pipeline import RAGPipeline
-from app.retrieval.base import RetrievedChunk
+from app.retrieval.base import RetrievalFilters, RetrievedChunk
 from app.scoring.schemas import ConfidenceBreakdown
 from app.verification.schemas import CitationVerdict, Verdict, VerifiedAnswer
 
@@ -14,7 +14,12 @@ class FakeRetriever:
         """Initialize with fixed chunks."""
         self.chunks = chunks
 
-    def retrieve(self, query: str, top_k: int = 5) -> list[RetrievedChunk]:
+    def retrieve(
+        self,
+        query: str,
+        top_k: int = 5,
+        filters: RetrievalFilters | None = None,
+    ) -> list[RetrievedChunk]:
         """Return fixed chunks."""
         return self.chunks[:top_k]
 

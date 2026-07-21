@@ -17,7 +17,10 @@ def build_no_answer_response(query: str, breakdown: ConfidenceBreakdown) -> dict
         "answer": "I don't have enough verified information in the knowledge base to confidently answer this question.",
         "query": query,
         "confidence": breakdown.final_confidence,
+        "confidence_breakdown": breakdown.model_dump(),
         "reason": breakdown.reason,
         "citations": [],
+        "flagged_citations": [],
+        "verdicts": [],
         "status": "no_answer",
     }

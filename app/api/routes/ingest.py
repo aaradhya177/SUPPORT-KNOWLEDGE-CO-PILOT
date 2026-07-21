@@ -1,28 +1,14 @@
 """Ingestion API routes."""
 
-from pathlib import Path
-from typing import Any
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 
-from fastapi import APIRouter, BackgroundTasks, status
-
-from app.api.dependencies import clear_dependency_caches
+from app.api.dependencies import require_admin_api_key
 from app.api.schemas import IngestResponse
 from app.config import get_settings
-from app.ingestion.loaders import SUPPORTED_EXTENSIONS
-from app.ingestion.pipeline import ingest_directory
-from app.retrieval.dense import DenseRetriever
-from app.retrieval.sparse import BM25Retriever
-from app.utils.logger import get_logger
-
-logger = get_logger(__name__)
+from app.ingestion.jobs import IngestionJob
+from app.ingestion.service import IngestionService
 
 router = APIRouter()
-
-_INGEST_STATUS: dict[str, Any] = {
-    "files_processed": 0,
-    "chunks_created": 0,
-    "status": "idle",
-}
 
 
 @router.post(
@@ -35,14 +21,18 @@ _INGEST_STATUS: dict[str, Any] = {
         "data/processed/chunks.jsonl, and rebuilds dense and sparse indexes."
     ),
 )
-def start_ingestion(background_tasks: BackgroundTasks) -> IngestResponse:
+def start_ingestion(
+    background_tasks: BackgroundTasks,
+    _: None = Depends(require_admin_api_key),
+) -> IngestResponse:
     """Start a background ingestion job."""
-    if _INGEST_STATUS["status"] == "running":
-        return IngestResponse(**_INGEST_STATUS)
+    service = _get_ingestion_service()
+    start = service.start_job()
 
-    _INGEST_STATUS.update({"files_processed": 0, "chunks_created": 0, "status": "running"})
-    background_tasks.add_task(_run_ingestion_job)
-    return IngestResponse(**_INGEST_STATUS)
+    if start.should_enqueue:
+        background_tasks.add_task(service.run_job, start.job.job_id)
+
+    return _to_response(start.job)
 
 
 @router.get(
@@ -50,48 +40,48 @@ def start_ingestion(background_tasks: BackgroundTasks) -> IngestResponse:
     response_model=IngestResponse,
     status_code=status.HTTP_200_OK,
     summary="Get ingestion status",
-    description="Returns the current in-memory status for the latest ingestion job.",
+    description="Returns the latest persisted ingestion job status.",
 )
-def get_ingestion_status() -> IngestResponse:
+def get_ingestion_status(_: None = Depends(require_admin_api_key)) -> IngestResponse:
     """Return the latest ingestion job status."""
-    return IngestResponse(**_INGEST_STATUS)
+    return _to_response(_get_ingestion_service().get_latest_job())
 
 
-def _run_ingestion_job() -> None:
-    """Run ingestion and index rebuilding in a background task."""
-    settings = get_settings()
-    raw_dir = Path("data/raw")
-    processed_path = Path("data/processed/chunks.jsonl")
-
-    try:
-        files_processed = _count_supported_files(raw_dir)
-        chunks_created = ingest_directory(raw_dir=raw_dir, processed_path=processed_path)
-
-        dense = DenseRetriever()
-        dense.build_index(chunks_path=processed_path, index_dir=Path(settings.dense_index_path))
-
-        sparse = BM25Retriever()
-        sparse.build_index(chunks_path=processed_path, index_dir=Path(settings.bm25_index_path))
-
-        clear_dependency_caches()
-        _INGEST_STATUS.update(
-            {
-                "files_processed": files_processed,
-                "chunks_created": chunks_created,
-                "status": "completed",
-            }
+@router.get(
+    "/ingest/status/{job_id}",
+    response_model=IngestResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Get ingestion status by job ID",
+    description="Returns a persisted ingestion job by its job ID.",
+)
+def get_ingestion_status_by_id(
+    job_id: str,
+    _: None = Depends(require_admin_api_key),
+) -> IngestResponse:
+    """Return ingestion job status by ID."""
+    job = _get_ingestion_service().get_job(job_id)
+    if job is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Ingestion job not found: {job_id}",
         )
-    except Exception:
-        logger.exception("Ingestion background job failed.")
-        _INGEST_STATUS.update({"status": "failed"})
+    return _to_response(job)
 
 
-def _count_supported_files(raw_dir: Path) -> int:
-    """Count supported input files under a raw data directory."""
-    if not raw_dir.exists():
-        return 0
-    return sum(
-        1
-        for path in raw_dir.rglob("*")
-        if path.is_file() and path.suffix.lower() in SUPPORTED_EXTENSIONS
+def _get_ingestion_service() -> IngestionService:
+    """Return the ingestion service for route handlers."""
+    settings = get_settings()
+    return IngestionService.from_settings(settings)
+
+
+def _to_response(job: IngestionJob) -> IngestResponse:
+    """Convert a persisted ingestion job to the API response schema."""
+    return IngestResponse(
+        job_id=job.job_id,
+        status=job.status,
+        files_processed=job.files_processed,
+        chunks_created=job.chunks_created,
+        started_at=job.started_at,
+        completed_at=job.completed_at,
+        error_message=job.error_message,
     )

@@ -7,7 +7,7 @@ from pathlib import Path
 
 import numpy as np
 
-from app.retrieval.base import BaseRetriever, RetrievedChunk
+from app.retrieval.base import BaseRetriever, RetrievalFilters, RetrievedChunk
 from app.retrieval.dense import DenseRetriever
 from app.retrieval.sparse import BM25Retriever
 
@@ -62,6 +62,8 @@ def _write_chunks(chunks_path: Path) -> None:
             "chunk_id": "doc-password_0",
             "doc_id": "doc-password",
             "source_path": "password.md",
+            "category": "password-reset",
+            "updated_at": "2026-01-01T00:00:00+00:00",
             "section": "Password Reset",
             "text": "Customers can reset a password from the sign-in page.",
             "token_count": 10,
@@ -72,6 +74,8 @@ def _write_chunks(chunks_path: Path) -> None:
             "chunk_id": "doc-billing_0",
             "doc_id": "doc-billing",
             "source_path": "billing.md",
+            "category": "billing-faq",
+            "updated_at": "2026-01-02T00:00:00+00:00",
             "section": "Invoices",
             "text": "Billing administrators can download invoice records.",
             "token_count": 7,
@@ -82,6 +86,8 @@ def _write_chunks(chunks_path: Path) -> None:
             "chunk_id": "doc-api_0",
             "doc_id": "doc-api",
             "source_path": "api.md",
+            "category": "api-rate-limits",
+            "updated_at": "2026-01-03T00:00:00+00:00",
             "section": "Rate Limits",
             "text": "API clients should back off after rate limit responses.",
             "token_count": 9,
@@ -121,6 +127,8 @@ def test_sparse_retriever_builds_loads_and_retrieves(tmp_path: Path) -> None:
 
     _assert_retrieved_chunks(results, "sparse")
     assert results[0].chunk_id == "doc-password_0"
+    assert results[0].category == "password-reset"
+    assert results[0].updated_at == "2026-01-01T00:00:00+00:00"
     assert loaded.retrieve("", top_k=5) == []
 
 
@@ -147,6 +155,8 @@ def test_dense_retriever_builds_loads_and_retrieves(tmp_path: Path, monkeypatch)
 
     _assert_retrieved_chunks(results, "dense")
     assert results[0].chunk_id == "doc-password_0"
+    assert results[0].category == "password-reset"
+    assert results[0].updated_at == "2026-01-01T00:00:00+00:00"
     assert loaded.retrieve("", top_k=5) == []
 
 
@@ -166,3 +176,55 @@ def test_retrievers_handle_empty_indexes_gracefully(tmp_path: Path, monkeypatch)
     sparse = BM25Retriever()
     sparse.build_index(chunks_path=chunks_path, index_dir=tmp_path / "sparse-empty")
     assert sparse.retrieve("anything", top_k=5) == []
+
+
+def test_sparse_retriever_filters_by_category_and_source_path(tmp_path: Path) -> None:
+    """Assert BM25Retriever applies metadata filters before returning results."""
+    chunks_path = tmp_path / "chunks.jsonl"
+    index_dir = tmp_path / "sparse"
+    _write_chunks(chunks_path)
+
+    retriever = BM25Retriever()
+    retriever.build_index(chunks_path=chunks_path, index_dir=index_dir)
+
+    category_results = retriever.retrieve(
+        "password billing api",
+        top_k=5,
+        filters=RetrievalFilters(category=["billing-faq"]),
+    )
+    source_results = retriever.retrieve(
+        "password billing api",
+        top_k=5,
+        filters=RetrievalFilters(source_path=["api.md"]),
+    )
+
+    assert [result.category for result in category_results] == ["billing-faq"]
+    assert [result.source_path for result in source_results] == ["api.md"]
+
+
+def test_dense_retriever_filters_by_category_and_source_path(tmp_path: Path, monkeypatch) -> None:
+    """Assert DenseRetriever applies metadata filters after vector search."""
+    monkeypatch.setattr(
+        "app.retrieval.dense._load_sentence_transformer",
+        lambda model_name: FakeSentenceTransformer(model_name),
+    )
+    chunks_path = tmp_path / "chunks.jsonl"
+    index_dir = tmp_path / "dense"
+    _write_chunks(chunks_path)
+
+    retriever = DenseRetriever(model_name="fake-model")
+    retriever.build_index(chunks_path=chunks_path, index_dir=index_dir)
+
+    category_results = retriever.retrieve(
+        "password billing api",
+        top_k=5,
+        filters=RetrievalFilters(category=["billing-faq"]),
+    )
+    source_results = retriever.retrieve(
+        "password billing api",
+        top_k=5,
+        filters=RetrievalFilters(source_path=["api.md"]),
+    )
+
+    assert [result.category for result in category_results] == ["billing-faq"]
+    assert [result.source_path for result in source_results] == ["api.md"]

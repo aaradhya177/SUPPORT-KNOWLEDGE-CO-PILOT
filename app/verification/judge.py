@@ -16,6 +16,7 @@ from app.generation.generator import (
 from app.llm.client import LLMClient
 from app.retrieval.base import RetrievedChunk
 from app.utils.logger import get_logger
+from app.verification.cache import JudgeCache, build_judge_cache_key
 from app.verification.prompts import JUDGE_SYSTEM_PROMPT
 from app.verification.schemas import CitationVerdict, Verdict, VerifiedAnswer
 
@@ -23,18 +24,34 @@ logger = get_logger(__name__)
 
 JSON_OBJECT_PATTERN = re.compile(r"\{.*?\}", re.DOTALL)
 SENTENCE_PATTERN = re.compile(r"[^.!?]+[.!?]?")
+JUDGE_PROMPT_VERSION = "citation-judge-v1"
 
 
 class CitationVerifier:
     """Verify generated answer citations with an LLM judge."""
 
-    def __init__(self, llm_client: LLMClient) -> None:
+    def __init__(
+        self,
+        llm_client: LLMClient,
+        cache: JudgeCache | None = None,
+        enable_cache: bool = False,
+        model_name: str | None = None,
+        prompt_version: str = JUDGE_PROMPT_VERSION,
+    ) -> None:
         """Initialize the citation verifier.
 
         Args:
             llm_client: LLM client dependency used for judging claims.
+            cache: Optional persistent cache for judge results.
+            enable_cache: Whether to read and write judge cache entries.
+            model_name: Judge model name stored with cache entries.
+            prompt_version: Prompt version stored with cache entries.
         """
         self.llm_client = llm_client
+        self.cache = cache
+        self.enable_cache = enable_cache
+        self.model_name = model_name or str(getattr(llm_client, "model_name", "unknown"))
+        self.prompt_version = prompt_version
 
     def _split_into_claims(
         self,
@@ -115,19 +132,11 @@ class CitationVerifier:
                 )
                 continue
 
-            user_prompt = _build_judge_prompt(
-                claim_excerpt=claim_excerpt, source_text=cited_chunk.text
-            )
-            raw_judge_output = self.llm_client.complete(
-                system_prompt=JUDGE_SYSTEM_PROMPT,
-                user_prompt=user_prompt,
-                max_tokens=256,
-            )
             verdicts.append(
-                _parse_judge_output(
-                    raw_output=raw_judge_output,
-                    chunk_id=citation.chunk_id,
+                self._judge_claim(
                     claim_excerpt=claim_excerpt,
+                    citation=citation,
+                    cited_chunk=cited_chunk,
                 )
             )
 
@@ -157,6 +166,51 @@ class CitationVerifier:
             verdicts=verdicts,
             all_supported=not unsupported_chunk_ids,
         )
+
+    def _judge_claim(
+        self,
+        claim_excerpt: str,
+        citation: Citation,
+        cited_chunk: RetrievedChunk,
+    ) -> CitationVerdict:
+        """Judge one claim-source pair, using cache when enabled."""
+        cache_key = build_judge_cache_key(
+            claim_excerpt=claim_excerpt,
+            chunk_id=citation.chunk_id,
+            source_text=cited_chunk.text,
+        )
+        if self.enable_cache and self.cache is not None:
+            cached = self.cache.get(cache_key)
+            if cached is not None:
+                return CitationVerdict(
+                    chunk_id=citation.chunk_id,
+                    claim_excerpt=claim_excerpt,
+                    verdict=cached.verdict,
+                    judge_reasoning=cached.reasoning,
+                )
+
+        user_prompt = _build_judge_prompt(
+            claim_excerpt=claim_excerpt,
+            source_text=cited_chunk.text,
+        )
+        raw_judge_output = self.llm_client.complete(
+            system_prompt=JUDGE_SYSTEM_PROMPT,
+            user_prompt=user_prompt,
+            max_tokens=256,
+        )
+        verdict = _parse_judge_output(
+            raw_output=raw_judge_output,
+            chunk_id=citation.chunk_id,
+            claim_excerpt=claim_excerpt,
+        )
+        if self.enable_cache and self.cache is not None:
+            self.cache.set(
+                cache_key=cache_key,
+                verdict=verdict,
+                model_name=self.model_name,
+                prompt_version=self.prompt_version,
+            )
+        return verdict
 
 
 def _build_judge_prompt(claim_excerpt: str, source_text: str) -> str:

@@ -15,6 +15,8 @@ class Chunk(BaseModel):
     chunk_id: str
     doc_id: str
     source_path: str
+    category: str | None = None
+    updated_at: str | None = None
     section: str | None
     text: str
     token_count: int = Field(ge=0)
@@ -106,6 +108,8 @@ def chunk_text(
     source_path: str,
     chunk_size: int,
     chunk_overlap: int,
+    category: str | None = None,
+    updated_at: str | None = None,
 ) -> list[Chunk]:
     """Split document text into overlapping chunks.
 
@@ -119,6 +123,8 @@ def chunk_text(
         source_path: Original source path.
         chunk_size: Maximum number of word-like units per chunk.
         chunk_overlap: Number of units to overlap between adjacent chunks.
+        category: Optional source category.
+        updated_at: Optional source updated timestamp.
 
     Raises:
         ValueError: If chunk sizing inputs are invalid.
@@ -167,6 +173,8 @@ def chunk_text(
                 chunk_id=f"{doc_id}_{index}",
                 doc_id=doc_id,
                 source_path=source_path,
+                category=category,
+                updated_at=updated_at,
                 section=section,
                 text=chunk_body,
                 token_count=_count_tokens(chunk_body),

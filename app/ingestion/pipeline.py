@@ -1,10 +1,12 @@
 """Directory-level ingestion pipeline for support knowledge sources."""
 
+from datetime import UTC, datetime
 from pathlib import Path
 
 from app.config import get_settings
 from app.ingestion.chunker import Chunk, chunk_text, make_doc_id
 from app.ingestion.loaders import SUPPORTED_EXTENSIONS, load_document
+from app.retrieval.base import infer_category
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -54,6 +56,8 @@ def ingest_directory(raw_dir: Path, processed_path: Path) -> int:
             source_path=str(source_file),
             chunk_size=settings.chunk_size,
             chunk_overlap=settings.chunk_overlap,
+            category=infer_category(source_file),
+            updated_at=_file_updated_at(source_file),
         )
         all_chunks.extend(chunks)
 
@@ -63,3 +67,8 @@ def ingest_directory(raw_dir: Path, processed_path: Path) -> int:
 
     logger.info("Wrote %s chunks to %s", len(all_chunks), processed_path)
     return len(all_chunks)
+
+
+def _file_updated_at(path: Path) -> str:
+    """Return the source file modification time as an ISO UTC timestamp."""
+    return datetime.fromtimestamp(path.stat().st_mtime, tz=UTC).isoformat()

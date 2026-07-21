@@ -22,6 +22,7 @@ from app.llm.client import LLMClient, create_llm_client
 from app.pipeline import RAGPipeline
 from app.retrieval.dense import DenseRetriever
 from app.retrieval.hybrid import HybridRetriever
+from app.retrieval.reranker import CrossEncoderReranker
 from app.retrieval.sparse import BM25Retriever
 from app.scoring.confidence import ConfidenceScorer
 from app.verification.judge import CitationVerifier
@@ -70,13 +71,19 @@ def _load_golden_set(path: Path, sample_size: int | None = None) -> list[GoldenQ
 
 def _build_pipeline(llm_client: LLMClient, dense_dir: Path, sparse_dir: Path) -> RAGPipeline:
     """Construct a production pipeline for evaluation."""
+    settings = get_settings()
     dense = DenseRetriever()
     dense.load_index(dense_dir)
 
     sparse = BM25Retriever()
     sparse.load_index(sparse_dir)
 
-    hybrid = HybridRetriever(dense_retriever=dense, sparse_retriever=sparse)
+    reranker = (
+        CrossEncoderReranker(model_name=settings.reranker_model_name)
+        if settings.enable_reranker
+        else None
+    )
+    hybrid = HybridRetriever(dense_retriever=dense, sparse_retriever=sparse, reranker=reranker)
     return RAGPipeline(
         retriever=hybrid,
         generator=AnswerGenerator(llm_client=llm_client),

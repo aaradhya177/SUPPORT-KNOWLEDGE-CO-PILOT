@@ -7,7 +7,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.dependencies import get_pipeline
+from app.api.middleware import request_id_middleware
 from app.api.routes.eval import router as eval_router
+from app.api.routes.feedback import router as feedback_router
 from app.api.routes.ingest import router as ingest_router
 from app.api.routes.query import router as query_router
 from app.utils.logger import get_logger
@@ -36,6 +38,8 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+app.middleware("http")(request_id_middleware)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -47,6 +51,7 @@ app.add_middleware(
 app.include_router(query_router, prefix="/api/v1", tags=["query"])
 app.include_router(ingest_router, prefix="/api/v1", tags=["ingest"])
 app.include_router(eval_router, prefix="/api/v1", tags=["eval"])
+app.include_router(feedback_router, prefix="/api/v1", tags=["feedback"])
 
 
 @app.get("/health", tags=["health"])

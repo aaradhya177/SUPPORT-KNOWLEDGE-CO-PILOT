@@ -3,6 +3,7 @@
 from app.generation.generator import Citation, GeneratedAnswer
 from app.llm.client import LLMClient
 from app.retrieval.base import RetrievedChunk
+from app.verification.cache import JudgeCache, build_judge_cache_key
 from app.verification.judge import CitationVerifier, _extract_json_object, _parse_judge_output
 from app.verification.schemas import Verdict
 
@@ -130,3 +131,79 @@ def test_verify_populates_verified_answer_and_marks_flagged_citations() -> None:
         Verdict.SUPPORTED,
         Verdict.UNSUPPORTED,
     ]
+
+
+def test_verify_uses_cached_judge_result_on_cache_hit(tmp_path) -> None:
+    """Assert cached judge results avoid repeat LLM calls."""
+    chunk = _chunk("a", "The reset link expires after thirty minutes.")
+    claim_excerpt = "The reset link expires after thirty minutes ."
+    cache = JudgeCache(tmp_path / "judge_cache.sqlite3")
+    cache_key = build_judge_cache_key(
+        claim_excerpt=claim_excerpt,
+        chunk_id="a",
+        source_text=chunk.text,
+    )
+    cache.set(
+        cache_key=cache_key,
+        verdict=_parse_judge_output(
+            raw_output='{"verdict": "SUPPORTED", "reasoning": "Cached support."}',
+            chunk_id="a",
+            claim_excerpt=claim_excerpt,
+        ),
+        model_name="fake-model",
+        prompt_version="test-v1",
+    )
+    llm = FakeJudgeLLM([])
+    verifier = CitationVerifier(
+        llm_client=llm,
+        cache=cache,
+        enable_cache=True,
+        model_name="fake-model",
+        prompt_version="test-v1",
+    )
+    generated = GeneratedAnswer(
+        answer_text="The reset link expires after thirty minutes [a].",
+        citations=[_citation("a")],
+        raw_llm_output="raw",
+    )
+
+    verified = verifier.verify(generated=generated, retrieved_chunks=[chunk])
+
+    assert len(llm.prompts) == 0
+    assert verified.verdicts[0].verdict == Verdict.SUPPORTED
+    assert verified.verdicts[0].judge_reasoning == "Cached support."
+
+
+def test_verify_stores_judge_result_on_cache_miss(tmp_path) -> None:
+    """Assert cache misses call the LLM and persist the parsed verdict."""
+    chunk = _chunk("a", "The reset link expires after thirty minutes.")
+    llm = FakeJudgeLLM(['{"verdict": "SUPPORTED", "reasoning": "The source says exactly this."}'])
+    cache = JudgeCache(tmp_path / "judge_cache.sqlite3")
+    verifier = CitationVerifier(
+        llm_client=llm,
+        cache=cache,
+        enable_cache=True,
+        model_name="fake-model",
+        prompt_version="test-v1",
+    )
+    generated = GeneratedAnswer(
+        answer_text="The reset link expires after thirty minutes [a].",
+        citations=[_citation("a")],
+        raw_llm_output="raw",
+    )
+
+    verified = verifier.verify(generated=generated, retrieved_chunks=[chunk])
+    cached = cache.get(
+        build_judge_cache_key(
+            claim_excerpt=verified.verdicts[0].claim_excerpt,
+            chunk_id="a",
+            source_text=chunk.text,
+        )
+    )
+
+    assert len(llm.prompts) == 1
+    assert cached is not None
+    assert cached.verdict == Verdict.SUPPORTED
+    assert cached.reasoning == "The source says exactly this."
+    assert cached.model_name == "fake-model"
+    assert cached.prompt_version == "test-v1"

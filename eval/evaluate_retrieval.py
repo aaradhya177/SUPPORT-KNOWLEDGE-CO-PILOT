@@ -19,6 +19,7 @@ from app.config import get_settings
 from app.retrieval.base import BaseRetriever, RetrievedChunk
 from app.retrieval.dense import DenseRetriever
 from app.retrieval.hybrid import HybridRetriever
+from app.retrieval.reranker import CrossEncoderReranker
 from app.retrieval.sparse import BM25Retriever
 
 
@@ -224,13 +225,20 @@ def main() -> None:
     sparse = BM25Retriever()
     sparse.load_index(args.sparse_dir)
 
-    hybrid = HybridRetriever(dense_retriever=dense, sparse_retriever=sparse)
+    settings = get_settings()
+    reranker = (
+        CrossEncoderReranker(model_name=settings.reranker_model_name)
+        if settings.enable_reranker
+        else None
+    )
+    hybrid = HybridRetriever(dense_retriever=dense, sparse_retriever=sparse, reranker=reranker)
+    hybrid_name = "Hybrid RRF + Reranker" if settings.enable_reranker else "Hybrid RRF"
 
     rows: list[dict[str, object]] = []
     for name, retriever in [
         ("Dense", dense),
         ("BM25", sparse),
-        ("Hybrid RRF", hybrid),
+        (hybrid_name, hybrid),
     ]:
         hit_rate, hits = _hit_rate_at_k(retriever, examples, top_k=args.top_k)
         rows.append(

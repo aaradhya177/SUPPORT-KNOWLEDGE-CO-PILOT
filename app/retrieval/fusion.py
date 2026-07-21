@@ -60,6 +60,8 @@ def reciprocal_rank_fusion(
                 chunk_id=representative.chunk_id,
                 doc_id=representative.doc_id,
                 source_path=representative.source_path,
+                category=representative.category,
+                updated_at=representative.updated_at,
                 text=representative.text,
                 section=representative.section,
                 score=fused_scores[chunk_id],

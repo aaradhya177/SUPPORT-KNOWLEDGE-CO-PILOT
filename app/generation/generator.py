@@ -23,6 +23,7 @@ class Citation(BaseModel):
     doc_id: str
     source_path: str
     quoted_text: str | None
+    section: str | None = None
 
 
 class GeneratedAnswer(BaseModel):
@@ -158,6 +159,7 @@ def _build_citations(
                 chunk_id=chunk.chunk_id,
                 doc_id=chunk.doc_id,
                 source_path=chunk.source_path,
+                section=chunk.section,
                 quoted_text=_snippet(chunk.text),
             )
         )

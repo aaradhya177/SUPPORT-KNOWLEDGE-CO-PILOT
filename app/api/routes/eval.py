@@ -2,8 +2,9 @@
 
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 
+from app.api.dependencies import require_admin_api_key
 from app.api.schemas import EvalRunRequest, EvalRunResponse
 from app.utils.logger import get_logger
 from eval.run_eval import run_golden_eval
@@ -23,7 +24,10 @@ router = APIRouter()
         "summary reports under reports/."
     ),
 )
-def run_eval_endpoint(request: EvalRunRequest) -> EvalRunResponse:
+def run_eval_endpoint(
+    request: EvalRunRequest,
+    _: None = Depends(require_admin_api_key),
+) -> EvalRunResponse:
     """Run the golden-set evaluation and return aggregate metrics."""
     report_path = Path("reports/eval_summary.md")
     try:
